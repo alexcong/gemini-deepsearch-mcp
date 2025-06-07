@@ -7,7 +7,9 @@ from fastmcp import FastMCP
 from langchain_core.messages import HumanMessage
 from pydantic import Field
 
+from .agent.configuration import Configuration
 from .agent.graph import graph
+from .agent.utils import get_effort_settings
 
 # Create MCP server
 mcp = FastMCP("DeepSearch")
@@ -29,19 +31,8 @@ def deep_search(
     Returns:
         A dictionary containing the answer to the query and a list of sources used.
     """
-    # Set search query count, research loops and reasoning model based on effort level
-    if effort == "low":
-        initial_search_query_count = 1
-        max_research_loops = 1
-        reasoning_model = "gemini-2.5-flash-preview-05-20"
-    elif effort == "medium":
-        initial_search_query_count = 3
-        max_research_loops = 2
-        reasoning_model = "gemini-2.5-flash-preview-05-20"
-    else:  # high effort
-        initial_search_query_count = 5
-        max_research_loops = 3
-        reasoning_model = "gemini-2.5-pro-preview-05-06"
+    # Get effort settings
+    effort_settings = get_effort_settings(effort)
 
     # Prepare the input state with the user's query
     input_state = {
@@ -49,21 +40,18 @@ def deep_search(
         "search_query": [],
         "web_research_result": [],
         "sources_gathered": [],
-        "initial_search_query_count": initial_search_query_count,
-        "max_research_loops": max_research_loops,
-        "reasoning_model": reasoning_model,
+        "initial_search_query_count": effort_settings["initial_search_query_count"],
+        "max_research_loops": effort_settings["max_research_loops"],
+        "reasoning_model": effort_settings["reasoning_model"],
     }
 
-    query_generator_model: str = "gemini-2.5-flash-preview-05-20"
-    reflection_model: str = "gemini-2.5-flash-preview-05-20"
-    answer_model: str = "gemini-2.5-pro-preview-05-06"
-
+    agent_config = Configuration()
     # Configuration for the agent
     config = {
         "configurable": {
-            "query_generator_model": query_generator_model,
-            "reflection_model": reflection_model,
-            "answer_model": answer_model,
+            "query_generator_model": agent_config.query_generator_model,
+            "reflection_model": agent_config.reflection_model,
+            "answer_model": agent_config.answer_model,
         }
     }
 

@@ -1,12 +1,13 @@
 """Simple test for MCP stdio server startup."""
 
-import asyncio
+import asyncio # Keep for asyncio.TimeoutError if used, though anyio.move_on_after may be better
 import os
-import subprocess
+import subprocess # Not strictly needed if using anyio.open_process fully
 import sys
-import time
+import time # Not strictly needed for async tests
 
 import pytest
+import anyio # Import anyio
 
 
 @pytest.mark.anyio
@@ -14,54 +15,64 @@ async def test_server_startup():
     """Test that the MCP server can start and stop cleanly."""
     print("Testing MCP server startup...")
 
-    # Get parent directory path
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    main_py_path = os.path.join(parent_dir, "main.py")
+    main_script_module = "gemini_deepsearch_mcp.main"
+    uv_executable_path = os.path.expanduser("~/.local/bin/uv")
 
-    try:
-        # Start the server process using uv run to ensure proper environment
-        process = await asyncio.create_subprocess_exec(
-            "uv", "run", "python",
-            main_py_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=parent_dir,
-        )
+    cmd = [uv_executable_path, "run", "python", "-m", main_script_module]
 
-        print("✓ Server process started")
+    async with await anyio.open_process(
+        cmd,
+        stdout=subprocess.PIPE, # Can still use subprocess.PIPE with anyio
+        stderr=subprocess.PIPE,
+        cwd=parent_dir,
+    ) as process:
+        print("✓ Server process starting...")
 
-        # Wait a moment for initialization
-        await asyncio.sleep(3)
-
-        # Check if process is still running
-        if process.returncode is None:
-            print("✓ Server is running")
-        else:
-            # Server exited - this might be expected for a stdio server if it's waiting for input
-            # Let's check if the exit was clean (returncode 0) or an error
-            if process.returncode == 0:
-                print("✓ Server exited cleanly (might be expected for stdio server)")
-                return True
-            else:
-                stdout, stderr = await process.communicate()
-                print(f"✗ Server exited with error: {stderr.decode()}")
-                return False
-
-        # Terminate the process
-        process.terminate()
         try:
-            await asyncio.wait_for(process.wait(), timeout=5)
-            print("✓ Server terminated cleanly")
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            print("✓ Server killed (timeout)")
+            # Wait for the process to exit, with a timeout.
+            # anyio.move_on_after is a context manager for timeouts.
+            with anyio.move_on_after(3) as scope:
+                await process.wait()
 
-        return True
+            if scope.cancelled_caught:
+                # Process is still running after 3 seconds (timeout occurred)
+                print("✓ Server is running after 3s.")
+            else:
+                # Process exited within 3 seconds
+                stderr_output_bytes = await process.stderr.receive() # Use receive for anyio streams
+                stderr_output = stderr_output_bytes.decode().strip()
+                stdout_output_bytes = await process.stdout.receive()
+                stdout_output = stdout_output_bytes.decode().strip()
 
-    except Exception as e:
-        print(f"✗ Test failed: {e}")
-        return False
+                if process.returncode != 0:
+                    print(f"✗ Server exited prematurely with code {process.returncode}.")
+                    if stdout_output:
+                        print(f"Stdout:\n{stdout_output}")
+                    if stderr_output:
+                        print(f"Stderr:\n{stderr_output}")
+                    assert process.returncode == 0, \
+                        f"Server exited prematurely with code {process.returncode}. Stderr: {stderr_output}"
+                elif stderr_output:
+                     print(f"✓ Server exited cleanly (code 0) but produced stderr output. This might indicate minor issues.")
+                     print(f"Stderr:\n{stderr_output}")
+                else:
+                    print(f"✓ Server exited cleanly (code 0) without stderr output.")
+
+        finally: # Ensure termination if it's still running
+            if process.returncode is None:
+                print("Terminating server...")
+                process.terminate()
+                with anyio.move_on_after(5) as term_scope:
+                    await process.wait()
+
+                if term_scope.cancelled_caught:
+                    print("✗ Server termination timed out, killing.")
+                    process.kill()
+                    await process.wait() # Wait for kill to complete
+                    print("✓ Server killed.")
+                else:
+                    print("✓ Server terminated cleanly.")
 
 
 def test_imports():

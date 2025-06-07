@@ -1,7 +1,33 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
+
+class EffortSettings(TypedDict):
+    initial_search_query_count: int
+    max_research_loops: int
+    reasoning_model: str
+
+def get_effort_settings(effort: Literal["low", "medium", "high"] | str) -> EffortSettings:
+    """Returns a dictionary of settings based on the effort string."""
+    if effort == "low":
+        return {
+            "initial_search_query_count": 1,
+            "max_research_loops": 1,
+            "reasoning_model": "gemini-2.5-flash-preview-05-20",
+        }
+    elif effort == "medium":
+        return {
+            "initial_search_query_count": 3,
+            "max_research_loops": 2,
+            "reasoning_model": "gemini-2.5-flash-preview-05-20",
+        }
+    else:  # Default to high for "high" or any other string
+        return {
+            "initial_search_query_count": 5,
+            "max_research_loops": 3,
+            "reasoning_model": "gemini-2.5-pro-preview-05-06",
+        }
 
 def get_research_topic(messages: List[AnyMessage]) -> str:
     """

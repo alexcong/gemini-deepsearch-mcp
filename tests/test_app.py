@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from google.api_core import exceptions as google_exceptions
 from langchain_core.messages import AIMessage, HumanMessage
 
 from gemini_deepsearch_mcp.app import app, deep_search
@@ -47,7 +48,7 @@ class TestDeepSearchTool:
         ):
             mock_to_thread.return_value = mock_graph_result
 
-            result = await deep_search("What is climate change?", "low")
+            result = await deep_search.fn("What is climate change?", "low")
 
             # Verify result structure
             assert "answer" in result
@@ -82,7 +83,7 @@ class TestDeepSearchTool:
         ):
             mock_to_thread.return_value = mock_graph_result
 
-            result = await deep_search("What is artificial intelligence?", "medium")
+            result = await deep_search.fn("What is artificial intelligence?", "medium")
 
             # Verify result structure
             assert "answer" in result
@@ -107,7 +108,7 @@ class TestDeepSearchTool:
         ):
             mock_to_thread.return_value = mock_graph_result
 
-            result = await deep_search("Explain quantum computing", "high")
+            result = await deep_search.fn("Explain quantum computing", "high")
 
             # Verify result structure
             assert "answer" in result
@@ -132,7 +133,7 @@ class TestDeepSearchTool:
         ):
             mock_to_thread.return_value = mock_graph_result
 
-            await deep_search("What is machine learning?")
+            await deep_search.fn("What is machine learning?")
 
             # Get the actual arguments passed to graph.invoke via asyncio.to_thread
             args, kwargs = mock_to_thread.call_args
@@ -153,7 +154,7 @@ class TestDeepSearchTool:
         ):
             mock_to_thread.return_value = mock_result
 
-            result = await deep_search("Test query", "low")
+            result = await deep_search.fn("Test query", "low")
 
             assert result["answer"] == "No answer generated."
             assert result["sources"] == []
@@ -168,7 +169,7 @@ class TestDeepSearchTool:
         ):
             mock_to_thread.return_value = mock_graph_result
 
-            await deep_search("Test query", "low")
+            await deep_search.fn("Test query", "low")
 
             # Get the config passed to graph.invoke
             args, kwargs = mock_to_thread.call_args
@@ -195,7 +196,7 @@ class TestDeepSearchTool:
             mock_to_thread.return_value = mock_graph_result
 
             query = "What is renewable energy?"
-            await deep_search(query, "medium")
+            await deep_search.fn(query, "medium")
 
             # Get the input state passed to graph.invoke
             args, kwargs = mock_to_thread.call_args
@@ -247,12 +248,46 @@ class TestErrorHandling:
     """Test error handling scenarios."""
 
     async def test_deep_search_graph_exception(self):
-        """Test deep_search when graph.invoke raises an exception."""
+        """Test deep_search when graph.invoke raises a generic Exception."""
+        error_message = "Graph execution failed"
         with patch("gemini_deepsearch_mcp.app.asyncio.to_thread") as mock_to_thread:
-            mock_to_thread.side_effect = Exception("Graph execution failed")
+            mock_to_thread.side_effect = Exception(error_message)
 
-            with pytest.raises(Exception, match="Graph execution failed"):
-                await deep_search("Test query", "low")
+            result = await deep_search.fn("Test query for generic exception", "low")
+            assert result == {
+                "answer": "An unexpected error occurred during the search process. Please check logs for details.",
+                "sources": [],
+            }
+
+    async def test_deep_search_google_api_permission_denied(self):
+        """Test deep_search when graph.invoke raises PermissionDenied."""
+        error_message = "Mocked Permission Denied"
+        with patch("gemini_deepsearch_mcp.app.asyncio.to_thread") as mock_to_thread:
+            mock_to_thread.side_effect = google_exceptions.PermissionDenied(
+                error_message
+            )
+
+            result = await deep_search.fn("Test query for permission denied", "low")
+            assert result == {
+                "answer": f"A Google API error occurred: {error_message}. Please check logs for details.",
+                "sources": [],
+            }
+
+    async def test_deep_search_google_api_service_unavailable(self):
+        """Test deep_search when graph.invoke raises ServiceUnavailable."""
+        error_message = "Mocked Service Unavailable"
+        with patch("gemini_deepsearch_mcp.app.asyncio.to_thread") as mock_to_thread:
+            mock_to_thread.side_effect = google_exceptions.ServiceUnavailable(
+                error_message
+            )
+
+            result = await deep_search.fn(
+                "Test query for service unavailable", "low"
+            )
+            assert result == {
+                "answer": f"A Google API error occurred: {error_message}. Please check logs for details.",
+                "sources": [],
+            }
 
     async def test_deep_search_invalid_effort_level(self, mock_graph_result):
         """Test deep_search with invalid effort level (should default to high)."""
@@ -265,7 +300,7 @@ class TestErrorHandling:
             mock_to_thread.return_value = mock_graph_result
 
             # Pass an invalid effort level - should default to high effort
-            await deep_search("Test query", "invalid")
+            await deep_search.fn("Test query", "invalid")
 
             # Get the actual arguments passed to graph.invoke via asyncio.to_thread
             args, kwargs = mock_to_thread.call_args
